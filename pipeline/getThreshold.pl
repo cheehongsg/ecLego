@@ -1,13 +1,17 @@
+#!/bin/env perl
+
 ##
-## ecLego2 v2.04.01
-## Copyright (C) 2019-2023 Chee-Hong WONG (Dr Chia-Lin Wei Laboratory)
+## ecLego3 v3.2304.01
+## Copyright (C) 2019-2026 Chee-Hong WONG (Dr Chia-Lin Wei Laboratory)
 ##
 ## ecLego component
+##   calculate coverage thresholds based on k-mer frequency distribution
 ##
 
 use strict;
 use Data::Dumper;
-use POSIX qw/ceil/;
+use POSIX qw/floor ceil/;
+my $G_WindowFlank = 2;
 
 my $kmerGraphFile = $ARGV[0];
 open INFILE, $kmerGraphFile || die "Fail to open $kmerGraphFile\n$!\n";
@@ -20,11 +24,11 @@ while (<INFILE>) {
 }
 close INFILE;
 
-my $cov2CN = get2CNCoverage(\@counts);
-my $cov1CN = ceil($cov2CN/2);
-my $cov4CN = ceil($cov2CN*2);
-my $cov5CN = ceil($cov2CN*5/2);
-my $cov6CN = ceil($cov2CN*3);
+my $cov2CN = floor(get2CNCoverage(\@counts));
+my $cov1CN = floor($cov2CN/2);
+my $cov4CN = floor($cov2CN*2);
+my $cov5CN = floor($cov2CN*5/2);
+my $cov6CN = floor($cov2CN*3);
 my $errorRate = estimateErrorRate(\@counts);
 
 printf "# %s\n", $kmerGraphFile;
@@ -37,15 +41,63 @@ printf "errorRate=%.3f\n", $errorRate;
 
 exit 0;
 
+sub getFirstValleyIndex {
+  my ($dataPointsRef) = @_;
+  my $numDatapoints = scalar(@{$dataPointsRef});
+  my $valleyIndex = 0;
+  my $valleyRef = $dataPointsRef->[$valleyIndex];
+  for(my $i=1; $i<($numDatapoints-1); ++$i) {
+    if ($valleyRef->{frequency}>$dataPointsRef->[$i]->{frequency}) {
+      $valleyRef = $dataPointsRef->[$i];
+      $valleyIndex = $i;
+    } else {
+      last;
+    }
+  }
+  return $valleyIndex;
+}
+
 sub get2CNCoverage {
   my ($dataPointsRef) = @_;
 
+  # find first valley
+  my $startIndex = getFirstValleyIndex($dataPointsRef);
+
+  # window averaging
   my $numDatapoints = scalar(@{$dataPointsRef});
-  for(my $i=1; $i<($numDatapoints-1); ++$i) {
-    if (($dataPointsRef->[$i-1]->{frequency} < $dataPointsRef->[$i]->{frequency})
-      && ($dataPointsRef->[$i]->{frequency} > $dataPointsRef->[$i+1]->{frequency})) {
-      return $dataPointsRef->[$i]->{kmercount};
+  my $windowFlank = $G_WindowFlank;
+  my $numElementsInWindow = 1+2*$windowFlank;
+  my @winAves = ();
+  for(my $i=$startIndex+$windowFlank; $i<($numDatapoints-$windowFlank); ++$i) {
+    my $kmerCount = $dataPointsRef->[$i]->{kmercount};
+    my $totalFreq = 0;
+    for(my $j=$i-$windowFlank; $j<=($i+$windowFlank); ++$j) {
+        $totalFreq += $dataPointsRef->[$i-1]->{frequency};
     }
+    push @winAves, {kmercount=>$kmerCount, frequency=>int($totalFreq/$numElementsInWindow)};
+  }
+
+  # find first peak
+  my $numWindowPoints = scalar(@winAves);
+  for(my $i=$windowFlank; $i<($numWindowPoints-$windowFlank); ++$i) {
+    my $failed = 0;
+    for(my $j=$i; $j<($i+$windowFlank); ++$j) {
+      if ($winAves[$j]->{frequency} > $winAves[$j+1]->{frequency}) {
+      } else {
+        $failed = 1;
+        last;
+      }
+    }
+    next if (0!=$failed);
+    for(my $j=$i-$windowFlank; $j<$i; ++$j) {
+      if ($winAves[$j]->{frequency} < $winAves[$j+1]->{frequency}) {
+      } else {
+        $failed = 1;
+        last;
+      }
+    }
+    next if (0!=$failed);
+    return $winAves[$i]->{kmercount};
   }
   return 0;
 }
