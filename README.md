@@ -1,117 +1,125 @@
-# ecLego2 - circular genomes asssembly from long-read data
+# ecLego3 - circular genomes asssembly from long-read data
 
-ecLego2 performs circular genomes de Novo asssembly from long-read data using [Flye](https://github.com/fenderglass/Flye/) (https://github.com/fenderglass/Flye/).
+To advance ecDNA structural characterization, we devised ecLego3, a customized circular genome assembler workflow, to comprehensively reconstruct ecDNA molecular structures and dissect their diversity from long-read whole genome sequence (lrWGS) data.
 
-```mermaid
-flowchart LR
-    A[long<br/>reads] -->|extract<br/>amplified<br/>reads| B[amplified<br/>reads]
-    B -->|remove<br/>chromosomal<br/>reads| C[non-chromosomal<br/>amplified reads]
-    C -->|de Novo<br/>assembly| D[edge<br/>graphs]
-    D -->|generate<br/>circular<br/>genomes| E[circular<br/>genomes]
-```
+## ecLego3 quickstart guide
 
-## Motivation
+For detailed documentation and advanced configuration, please visit the [Wiki documentation](../../wiki).
 
-The predecessor ecLego (2018-2022) uses a reference mapping approach to address the circular genomes structure with success. However, the quality of the reference is pivotal and such anchors make complete structure interpretation difficult in certain scenarios.
 
-As with personalized genomes, each ecDNA (circular genome) population is unique and should serve as the backbone for its analyses. Works on ecLego2 started in 2021 to generate the populations of circular genomes captured in the long-reads.
+### Installation
 
-## Using ecLego2
+Clone the repository into your project directory (e.g., ```/my_project```) and run the setup script:
 
-**ecLego2 setup**
-
-* setup ecLego2 by cloning this repository under your project folder, e.g. ecLego under /<project_folder>/
 ```bash
-# set up your project directory in the environment variable PROJECTDIR
-export PROJECTDIR=/<project_folder>
+# Define your project directory
+export PROJECTDIR=/my_project
 cd ${PROJECTDIR}
 
 # clone the repository
-git clone https://github.com/cheehongsg/ecLego.git
+git clone --branch 'v3.2403.01' --depth 1 https://github.com/cheehongsg/ecLego.git
 
-# ensure that bash scripts are executable
-cd ${PROJECTDIR}/ecLego
-chmod u+x ./*.sh
-
-# download singularity images
-./download_sif.sh
-
-# download t2tv2 genome reference
-./download_hsa_t2tv2.sh
-
-# setup kmers databases
-./setup_hsa_t2tv2_kmerdbs.sh
+# Make scripts executable and initialize environment
+cd ${PROJECTDIR}/ecLego && chmod u+x ./*.sh
+./setup_ecLego.sh
 ```
 
-**Running ecLego2 on your long-read data**
 
-* set up your sample's ONT fastq file under /<project_folder>/ecLego/data, e.g. for sample B168 fastq, place it at: /<project_folder>/ecLego/data/B168/B168.fastq.gz
+### Long-read data setup
 
-**ecDNA assembly resources consumption**
-- 12 cores
-- 36 GB memory (for error rate <3%, or higher memory for higher error rate)
-- 3-12 hours runtime
+By default, ecLego expects long-read FASTQ files to be nested in sample-specific subdirectories under ```/my_project/data```. Following this convention avoids the need for custom container mount configurations.
 
 
-**ecDNA assembly on a machine**
+#### Directory Template:
 
-run as a process on the computer:
+```
+/my_project/data/
+└── [Sample_ID]/
+    └── [Sample_ID].fastq.gz
+```
+
+
+### Running ecLego3
+
+**Prerequisite:** Ensure Singularity or Apptainer is installed.
+
+
+#### 1. Generate Read Metrics
+
+First, assess the read length distribution to determine the optimal parameters for your sample.
+
 ```bash
-# assume singularity on path, and 
-# ensure path is available in singularity run
-export SINGULARITY_BINDPATH=/<project_folder>/ecLego
-cd /<project_folder>/ecLego
-pipeline/ecLegov2_s01.sh \
-data/B168/B168.fastq.gz \
-pipeline/genomes/t2tv2.fasta \
-2>&1 | tee data/B168/B168.fastq.gz.ecLegov2.log
+export SAMPLEID=my_sample
+cd ${PROJECTDIR}/data/${SAMPLEID}
+
+# Calculate FASTQ metrics
+${PROJECTDIR}/ecLego/pipeline/getFastqMetrics.pl \
+  ${SAMPLEID}.fastq.gz \
+  | tee ${SAMPLEID}.fq.gz.metrics
 ```
 
-**or ecDNA assembly on a compute node**
 
-submit as cluster job:
+#### 2. Execute ecLego3 Pipeline
+
+Apply your derived metrics to initiate the processing script, tailoring parameters as recommended for your sample.
+
 ```bash
-# assume singularity on path, and 
-# ensure path is available in singularity run
-export SINGULARITY_BINDPATH=/<project_folder>/ecLego
-cd /<project_folder>/ecLego
-sbatch -n 1 -c 12 --mem=36G --time 12:00:00 \
---job-name B168 \
-pipeline/ecLegov2_s01.sh \
-data/B168/B168.fastq.gz \
-pipeline/genomes/t2tv2.fasta
+# Run drafting and refinement
+cd ${PROJECTDIR}/data/${SAMPLEID}
+${PROJECTDIR}/ecLego/pipeline/ecLego3.draft.and.refine.sh \
+  ${SAMPLEID}.fastq.gz \
+  ${PROJECTDIR}/ecLego/pipeline/genomes/t2tv2.fasta \
+  2>&1 | tee ${SAMPLEID}.ecLego3.run.log
 ```
 
-**ecDNA assembly results**
+**Quick Tip:** Monitoring the ```.log``` file in real-time allows you to catch potential configuration errors early in the drafting phase.
 
-* The most critical files for result interpretation are in the assembly folder. (Best to have a copy of the whole assembly folder)
-```
-data/B168/B168.fastq.gz-output/B168.fastq.gz_candidate_assembly/
-    B168.cn15.disjointcyclic.gv.overview.xls
-    B168.cn15.disjointcyclic.gv.graphvizonline.html
-    B168.cn15.disjointcyclic.bam
-    B168.cn15.disjointcyclic.bam.bai
-```
 
-* The next important files are the all edges assembled. (This gives you idea on where the ecDNA segments originated.)
-```
-data/B168/B168.fastq.gz-output/
-    B168.fastq.gz.candidates.graph_before_rr.tdf
-    B168.fastq.gz.candidates.graph_before_rr.bam
-    B168.fastq.gz.candidates.graph_before_rr.bam.bai
-```
+### Parameter Reference
 
-* Finally, the set of reads considered for ecDNAs assembly.
-```
-data/B168/B168.fastq.gz-output/
-    B168.fastq.gz.candidates.tdf
-    B168.fastq.gz.candidates.bam
-    B168.fastq.gz.candidates.bam.bai
-```
+| Position | Parameter | Description | Example Value |
+|:---:|---|---|---|
+| 1 | Input FASTQ | Path to the long-read sequencing data (compressed). | sample.fastq.gz |
+| 2 | Reference FASTA | Path to the reference genome assembly. For visualization. | t2tv2.fasta |
+| 3 | Coverage (2CN); *optional* | Expected diploid read coverage. | *unspecified* |
+| 4 | Seed Overlap (bp); *optional* | Seed extension overlap threshold for support reads selection. | *unspecified* |
+| 5 | Assembly Overlap (bp); *optional* | Extension overlap threshold for assembly. | *unspecified* |
+
+
+### Output Files
+
+| File | Description |
+|---|---|
+| *.metrics | Updated read statistics and coverage estimations for the final assembly. |
+| *.ecDNA.fasta | The final reconstructed sequences of identified ecDNA structures. |
+| *.refined.bam | Refined long-read alignments to the reconstructed ecDNA amplicons. |
+| *.cycles.txt | A summary of the identified circular paths and segment coordinates. |
+| *.ecLego3.run.log | The complete execution log, including timestamps and tool parameters. |
+
+**TODO: write up the output files**
+
+
+### Pipeline Limitations and Technical Refinements
+
+- **Workflow Migration**: Transitioning the architecture to a Nextflow framework to facilitate dynamic resource allocation and optimize multi-core task parallelization.
+
+- **Algorithmic Curation**: Implementation of rigorous automated filtering protocols to identify and exclude spurious circular genome assemblies.
+
+- **Autonomous Stratification**: Development of fully automated pipelines for the characterization and distribution analysis of genetic subpopulations.
+
+- **Modular Expansion**: Integration of comprehensive downstream modules for comparative analysis and functional annotation.
 
 
 ## Acknowledgements
+* Our collaborators at Chang Gung Memorial Hospital, Linkou, Taiwan
+* Albert H. Kim and the Tumor Bank of the Brain Tumor Center, St. Louis
 * JGM GT team, esp. Chew Yee NGAN and Meihong LI
 * Wei Lab; Aziz Taghbalout
-* Our projects collaborator
 * [Flye](https://github.com/fenderglass/Flye/) (https://github.com/fenderglass/Flye/).
+* [KMC3](https://github.com/refresh-bio/KMC)(https://github.com/refresh-bio/KMC)
+* [Sniffles2](https://github.com/fritzsedlazeck/Sniffles)(https://github.com/fritzsedlazeck/Sniffles)
+
+
+## Citations
+"An Atlas of Extrachromosomal DNA Structures Illuminates Its Evolution and Biogenesis in Cancer" [DOI:10.64898/2025.12.24.696443](https://doi.org/10.64898/2025.12.24.696443)
+
